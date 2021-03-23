@@ -1,3 +1,6 @@
+NEED TO IMPLEMENT NTP TRAFFIC PRIORITY!
+
+
 #include "lwip_t41.h"
 #include "lwip/inet.h"
 #include "lwip/dhcp.h"
