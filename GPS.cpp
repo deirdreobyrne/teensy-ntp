@@ -5,6 +5,7 @@
 #include "GPS.h"
 #include "InputCapture.h"
 #include "settings.h"
+#include "MulticastServer.h"
 
 #define GPS_CODE_ZDA "GPZDA"
 #define GPS_CODE2_ZDA "GNZDA"
@@ -246,6 +247,8 @@ bool GPSDateTime::decode() {
       }
       // commit datetime
     }
+    
+    multicastNmeaString(msg.c_str());
 
     // end of string
     msg = "\0";

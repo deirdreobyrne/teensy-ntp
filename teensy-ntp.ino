@@ -11,6 +11,7 @@
 #include "platform-clock.h"
 #include "WebServer.h"
 #include "WebContent.h"
+#include "MulticastServer.h"
 
 // see the settings file for common settings
 #include "settings.h"
@@ -32,6 +33,8 @@ struct {
 } samples[WAIT_COUNT];
 NTPServer server(&localClock);
 
+struct netif vlan3_netif;
+
 static void netif_status_callback(struct netif *netif) {
   static char str1[IP4ADDR_STRLEN_MAX], str2[IP4ADDR_STRLEN_MAX], str3[IP4ADDR_STRLEN_MAX];
   Serial.printf("netif status changed: ip %s, mask %s, gw %s\n", ip4addr_ntoa_r(netif_ip_addr4(netif), str1, IP4ADDR_STRLEN_MAX), ip4addr_ntoa_r(netif_ip_netmask4(netif), str2, IP4ADDR_STRLEN_MAX), ip4addr_ntoa_r(netif_ip_gw4(netif), str3, IP4ADDR_STRLEN_MAX));
@@ -39,6 +42,13 @@ static void netif_status_callback(struct netif *netif) {
 
 static void link_status_callback(struct netif *netif) {
   Serial.printf("enet link status: %s\n", netif_is_link_up(netif) ? "up" : "down");
+  if (netif == netif_default) {
+    if (netif_is_link_up(netif_default)) {
+      netif_set_link_up(&vlan3_netif);
+    } else {
+      netif_set_link_down(&vlan3_netif);
+    }
+  }
 }
 
 void setup() {
@@ -53,14 +63,26 @@ void setup() {
 
   enet_init(NULL, NULL, NULL);
 
+  netif_add_vlan(&vlan3_netif, IP_ADDR_ANY, IP_ADDR_ANY, IP_ADDR_ANY, 3, 0, t41_extra_netif_init, 0);
+  netif_set_up(&vlan3_netif);
+
   netif_set_status_callback(netif_default, netif_status_callback);
   netif_set_link_callback(netif_default, link_status_callback);
+  netif_set_vlan_id(netif_default, 1);
   netif_set_up(netif_default);
   netif_set_hostname(netif_default, DHCP_HOSTNAME);
   dhcp_start(netif_default);
 
-  Serial.println("waiting for link");
+  netif_set_status_callback(&vlan3_netif, netif_status_callback);
+  netif_set_link_callback(&vlan3_netif, link_status_callback);
+  dhcp_start(&vlan3_netif);
+  Serial.println("waiting for links");
   while (!netif_is_link_up(netif_default)) {
+    enet_proc_input(); // await on link up
+    enet_poll();
+    delay(1);
+  }
+  while (!netif_is_link_up(&vlan3_netif)) {
     enet_proc_input(); // await on link up
     enet_poll();
     delay(1);
@@ -82,6 +104,7 @@ void setup() {
     GPS_SERIAL.read();
   }
   msec = 0;
+  setupMulticast();
 }
 
 static uint8_t median(int64_t one, int64_t two, int64_t three) {
@@ -228,6 +251,12 @@ static void bootloader_poll() {
   }
 }
 
+void pollRawInput() {
+  if (Serial2.available()) {
+    addRawGpsChar(Serial2.read());
+  }
+}
+
 void loop() {
   enet_proc_input();
 
@@ -240,4 +269,16 @@ void loop() {
   enet_proc_input();
 
   bootloader_poll();
+
+  enet_proc_input();
+
+  pollSystemStats();
+
+  enet_proc_input();
+
+  pollRawMulticast();
+
+  enet_proc_input();
+
+  pollRawInput();
 }
