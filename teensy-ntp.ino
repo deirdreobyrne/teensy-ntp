@@ -1,5 +1,9 @@
 NEED TO IMPLEMENT NTP TRAFFIC PRIORITY!
 
+Also
+- nmea transmit (if it can be done via vlan1 only)
+- delayed nmea broadcast (i.e. do a enet_proc_input() in the main loop before broadcast)
+
 
 #include "lwip_t41.h"
 #include "lwip/inet.h"
