@@ -23,9 +23,9 @@ uint32_t systemStatsTime, lastRawSendTime;
 char systemStatsTemplate[70];
 char rawGpsBuffer[RAW_GPS_BUFFER_SIZE];
 int rawGpsBufferLen = 0;
+char *nmeaString = 0;
 
-void setupMulticast() {
-  uint8_t *mac = netif_default->hwaddr;
+void setup_multicast() {
   IP4_ADDR(&systemStatsAddr, 239,0,0,1);
   IP4_ADDR(&nmeaAddr, 239,0,0,2);
   IP4_ADDR(&rawAddr, 239,0,0,3);
@@ -34,7 +34,7 @@ void setupMulticast() {
   lastRawSendTime = millis();
 }
 
-void pollSystemStats() {
+void poll_system_stats() {
   uint32_t currentMillis = millis();
   if (PERIOD_EXPIRED(currentMillis,systemStatsTime,SYSTEM_STATS_PERIOD_MS) && (TEMPMON_TEMPSENSE0 & 0x4U)) {
     char msg[70];
@@ -54,19 +54,29 @@ void pollSystemStats() {
   }
 }
 
-void multicastNmeaString(const char *nmea) {
-  struct udp_pcb *pcb;
-  struct pbuf *pb;
-  int len = strlen(nmea) - 1; // It will always have a CR or an LF at the end - see GPS.cpp
-  pb = pbuf_alloc(PBUF_TRANSPORT, len, PBUF_RAM);
-  pcb = udp_new();
-  pbuf_take(pb, nmea, len);
-  udp_sendto_if(pcb, pb, &nmeaAddr, 1026, netif_default);
-  pbuf_free(pb);
-  udp_remove(pcb);
+void multicast_nmea_string(const char *nmea) {
+  if (!nmeaString) {
+    nmeaString = malloc(strlen(nmea));
+    if (nmeaString) strncpy(nmeaString, nmea, strlen(nmea)-1);  // It will always have a CR or an LF at the end - see GPS.cpp
+  }
 }
 
-void sendGpsRaw() {
+void send_pending_nmea_string() {
+  if (nmeaString) {
+    struct udp_pcb *pcb;
+    struct pbuf *pb;
+    int len = strlen(nmeaString) - 1;
+    pb = pbuf_alloc(PBUF_TRANSPORT, len, PBUF_RAM);
+    pcb = udp_new();
+    pbuf_take(pb, nmeaString, len);
+    udp_sendto_if(pcb, pb, &nmeaAddr, 1026, netif_default);
+    pbuf_free(pb);
+    udp_remove(pcb);
+    free(nmeaString);
+  }
+}
+
+void send_gps_raw() {
   if (rawGpsBufferLen) {
     struct udp_pcb *pcb;
     struct pbuf *pb;
@@ -82,13 +92,13 @@ void sendGpsRaw() {
   lastRawSendTime = millis();
 }
 
-void addRawGpsChar(char c) {
+void add_raw_gps_char(char c) {
   rawGpsBuffer[rawGpsBufferLen++] = c;
   if (rawGpsBufferLen == RAW_GPS_BUFFER_SIZE) {
-    sendGpsRaw();
+    send_gps_raw();
   }
 }
 
-void pollRawMulticast() {
-  if (PERIOD_EXPIRED(millis(),lastRawSendTime,RAW_GPS_MAX_QUIET_MS)) sendGpsRaw();
+void poll_raw_multicast() {
+  if (PERIOD_EXPIRED(millis(),lastRawSendTime,RAW_GPS_MAX_QUIET_MS)) send_gps_raw();
 }

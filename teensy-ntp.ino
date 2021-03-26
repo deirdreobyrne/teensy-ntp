@@ -1,10 +1,5 @@
 NEED TO IMPLEMENT NTP TRAFFIC PRIORITY!
 
-Also
-- nmea transmit (if it can be done via vlan1 only)
-- delayed nmea broadcast (i.e. do a enet_proc_input() in the main loop before broadcast)
-
-
 #include "lwip_t41.h"
 #include "lwip/inet.h"
 #include "lwip/dhcp.h"
@@ -111,7 +106,7 @@ void setup() {
     GPS_SERIAL.read();
   }
   msec = 0;
-  setupMulticast();
+  setup_multicast();
 }
 
 static uint8_t median(int64_t one, int64_t two, int64_t three) {
@@ -258,9 +253,9 @@ static void bootloader_poll() {
   }
 }
 
-void pollRawInput() {
+void poll_raw_input() {
   if (Serial2.available()) {
-    addRawGpsChar(Serial2.read());
+    add_raw_gps_char(Serial2.read());
   }
 }
 
@@ -279,13 +274,17 @@ void loop() {
 
   enet_proc_input();
 
-  pollSystemStats();
+  poll_system_stats();
 
   enet_proc_input();
 
-  pollRawMulticast();
+  poll_raw_multicast();
 
   enet_proc_input();
 
-  pollRawInput();
+  poll_raw_input();
+
+  enet_proc_input();
+
+  send_pending_nmea_string();
 }

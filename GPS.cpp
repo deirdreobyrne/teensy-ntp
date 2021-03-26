@@ -248,7 +248,7 @@ bool GPSDateTime::decode() {
       // commit datetime
     }
     
-    multicastNmeaString(msg.c_str());
+    multicast_nmea_string(msg.c_str());
 
     // end of string
     msg = "\0";

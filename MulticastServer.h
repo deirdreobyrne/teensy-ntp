@@ -4,11 +4,12 @@
 extern "C" {
 #endif
 
-void setupMulticast();
-void pollSystemStats();
-void multicastNmeaString(const char *nmea);
-void addRawGpsChar(char c);
-void pollRawMulticast();
+void setup_multicast();
+void poll_system_stats();
+void multicast_nmea_string(const char *nmea);
+void send_pending_nmea_string();
+void add_raw_gps_char(char c);
+void poll_raw_multicast();
 
 #ifdef __cplusplus
 }
