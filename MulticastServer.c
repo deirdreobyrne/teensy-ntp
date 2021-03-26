@@ -73,6 +73,7 @@ void send_pending_nmea_string() {
     pbuf_free(pb);
     udp_remove(pcb);
     free(nmeaString);
+	nmeaString = 0;
   }
 }
 
