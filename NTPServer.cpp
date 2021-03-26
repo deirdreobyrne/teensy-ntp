@@ -107,6 +107,7 @@ void NTPServer::recv(struct pbuf *request_buf, struct pbuf *response_buf, const 
   }
 
   enet_txTimestampNextPacket();
+  ntp_pcb->tos = 0xB8; // TODO check this sets the DSCP correctly
   udp_sendto(ntp_pcb, response_buf, addr, port);
 
   clientList.addRx(lastTxAddr, lastTxPort, RXtimestamp.parts[TS_POS_S], RXtimestamp.parts[TS_POS_SUBS]);

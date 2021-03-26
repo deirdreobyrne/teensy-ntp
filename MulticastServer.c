@@ -56,8 +56,10 @@ void poll_system_stats() {
 
 void multicast_nmea_string(const char *nmea) {
   if (!nmeaString) {
-    nmeaString = malloc(strlen(nmea));
-    if (nmeaString) strncpy(nmeaString, nmea, strlen(nmea)-1);  // It will always have a CR or an LF at the end - see GPS.cpp
+    int len = strlen(nmea)-1;
+    nmeaString = malloc(len+1);
+    if (nmeaString) strncpy(nmeaString, nmea, len);  // It will always have a CR or an LF at the end - see GPS.cpp
+    nmeaString[len]=0;
   }
 }
 
@@ -65,7 +67,7 @@ void send_pending_nmea_string() {
   if (nmeaString) {
     struct udp_pcb *pcb;
     struct pbuf *pb;
-    int len = strlen(nmeaString) - 1;
+    int len = strlen(nmeaString);
     pb = pbuf_alloc(PBUF_TRANSPORT, len, PBUF_RAM);
     pcb = udp_new();
     pbuf_take(pb, nmeaString, len);
@@ -73,7 +75,7 @@ void send_pending_nmea_string() {
     pbuf_free(pb);
     udp_remove(pcb);
     free(nmeaString);
-	nmeaString = 0;
+    nmeaString = 0;
   }
 }
 

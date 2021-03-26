@@ -1,5 +1,3 @@
-NEED TO IMPLEMENT NTP TRAFFIC PRIORITY!
-
 #include "lwip_t41.h"
 #include "lwip/inet.h"
 #include "lwip/dhcp.h"
@@ -59,6 +57,7 @@ void setup() {
   DateTime compile = DateTime(__DATE__, __TIME__);
 
   GPS_SERIAL.begin(GPS_BAUD);
+  Serial2.begin(GPS_BAUD);
 
   Serial.println("Ethernet 1588 NTP Server");
   Serial.println("------------------------\n");
@@ -75,6 +74,7 @@ void setup() {
   netif_set_hostname(netif_default, DHCP_HOSTNAME);
   dhcp_start(netif_default);
 
+  netif_set_hostname(&vlan3_netif, DHCP_HOSTNAME "-vlan3");
   netif_set_status_callback(&vlan3_netif, netif_status_callback);
   netif_set_link_callback(&vlan3_netif, link_status_callback);
   dhcp_start(&vlan3_netif);
@@ -104,6 +104,9 @@ void setup() {
 
   while(GPS_SERIAL.available()) { // throw away all the text received while starting up
     GPS_SERIAL.read();
+  }
+  while(Serial2.available()) { // throw away all the text received while starting up
+    Serial2.read();
   }
   msec = 0;
   setup_multicast();
