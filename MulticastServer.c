@@ -20,7 +20,7 @@
 
 ip4_addr_t systemStatsAddr, nmeaAddr, rawAddr;
 uint32_t systemStatsTime, lastRawSendTime;
-char systemStatsTemplate[140];
+char systemStatsTemplate[70];
 char rawGpsBuffer[RAW_GPS_BUFFER_SIZE];
 int rawGpsBufferLen = 0;
 
@@ -30,19 +30,19 @@ void setupMulticast() {
   IP4_ADDR(&nmeaAddr, 239,0,0,2);
   IP4_ADDR(&rawAddr, 239,0,0,3);
   systemStatsTime = millis() - SYSTEM_STATS_PERIOD_MS;
-  snprintf(systemStatsTemplate,140,"{\"topic\":\"systemstats\",\"payload\":{\"platform\":\"teensy4.1\",\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\",\"temperature\":%s}}", mac[0],mac[1],mac[2],mac[3],mac[4],mac[5],"%.1f");
+  strcpy(systemStatsTemplate, "{\"topic\":\"teensy-ntp-cpu-temperature\",\"payload\":%.1f}");
   lastRawSendTime = millis();
 }
 
 void pollSystemStats() {
   uint32_t currentMillis = millis();
   if (PERIOD_EXPIRED(currentMillis,systemStatsTime,SYSTEM_STATS_PERIOD_MS) && (TEMPMON_TEMPSENSE0 & 0x4U)) {
-    char msg[140];
+    char msg[70];
     struct udp_pcb *pcb;
     struct pbuf *pb;
     int len;
 
-    snprintf(msg, 140, systemStatsTemplate, tempmonGetTemp());
+    snprintf(msg, 70, systemStatsTemplate, tempmonGetTemp());
     len = strlen(msg);
     pb = pbuf_alloc(PBUF_TRANSPORT, len, PBUF_RAM);
     pcb = udp_new();
