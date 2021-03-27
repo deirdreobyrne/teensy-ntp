@@ -1,6 +1,7 @@
 #include "lwip_t41.h"
 #include "lwip/inet.h"
 #include "lwip/dhcp.h"
+#include "lwip/ip4_addr.h"
 #include "InputCapture.h"
 #include "DateTime.h"
 #include "GPS.h"
@@ -33,22 +34,60 @@ struct {
 } samples[WAIT_COUNT];
 NTPServer server(&localClock);
 
+char *nmea_tx_buffer = 0;
+int nmea_tx_index = 0;
+
+ip4_addr_t vlan1_ip, vlan1_mask, vlan1_gw, vlan3_ip, vlan3_mask, vlan3_gw;
+
+#define UDP_LISTEN_ADDR (&vlan1_ip)
+
 struct netif vlan3_netif;
 
 static void netif_status_callback(struct netif *netif) {
   static char str1[IP4ADDR_STRLEN_MAX], str2[IP4ADDR_STRLEN_MAX], str3[IP4ADDR_STRLEN_MAX];
-  Serial.printf("netif status changed: ip %s, mask %s, gw %s\n", ip4addr_ntoa_r(netif_ip_addr4(netif), str1, IP4ADDR_STRLEN_MAX), ip4addr_ntoa_r(netif_ip_netmask4(netif), str2, IP4ADDR_STRLEN_MAX), ip4addr_ntoa_r(netif_ip_gw4(netif), str3, IP4ADDR_STRLEN_MAX));
+  Serial.printf("netif %c%c status changed: ip %s, mask %s, gw %s\n", netif->name[0], netif->name[1], ip4addr_ntoa_r(netif_ip_addr4(netif), str1, IP4ADDR_STRLEN_MAX), ip4addr_ntoa_r(netif_ip_netmask4(netif), str2, IP4ADDR_STRLEN_MAX), ip4addr_ntoa_r(netif_ip_gw4(netif), str3, IP4ADDR_STRLEN_MAX));
 }
 
 static void link_status_callback(struct netif *netif) {
-  Serial.printf("enet link status: %s\n", netif_is_link_up(netif) ? "up" : "down");
-  if (netif == netif_default) {
-    if (netif_is_link_up(netif_default)) {
-      netif_set_link_up(&vlan3_netif);
-    } else {
-      netif_set_link_down(&vlan3_netif);
+  Serial.printf("enet netif %c%c link status: %s\n", netif->name[0], netif->name[1], netif_is_link_up(netif) ? "up" : "down");
+}
+
+void udp_nmea_callback(void * arg, struct udp_pcb * upcb, struct pbuf * p, const ip_addr_t * addr, u16_t port)
+{
+  if (p == NULL) return;
+  if (nmea_tx_buffer == NULL) {
+    nmea_tx_buffer = (char*)malloc(p->len+1);
+    if (nmea_tx_buffer) {
+      memcpy(nmea_tx_buffer, p->payload, p->len);
+      nmea_tx_buffer[p->len] = 0;
+      nmea_tx_index = 0;
     }
   }
+  pbuf_free(p);
+}
+
+void nmea_send_to_gps() {
+  if (nmea_tx_buffer) {
+    if (Serial2.availableForWrite()) {
+      if (nmea_tx_buffer[nmea_tx_index]) {
+        Serial2.write(nmea_tx_buffer[nmea_tx_index++]);
+      } else {
+        free(nmea_tx_buffer);
+        nmea_tx_buffer = 0;
+        nmea_tx_index = 0;
+      }
+    }
+  }
+}
+
+void udp_nmea_srv() {
+  struct udp_pcb *pcb;
+
+  Serial.println("udp nmea srv on port 2048");
+  pcb = udp_new();
+  udp_bind(pcb, UDP_LISTEN_ADDR, 2048);    // local port
+  udp_recv(pcb, udp_nmea_callback, NULL);  // do once?
+  // fall into loop  ether_poll
 }
 
 void setup() {
@@ -62,33 +101,41 @@ void setup() {
   Serial.println("Ethernet 1588 NTP Server");
   Serial.println("------------------------\n");
 
-  enet_init(NULL, NULL, NULL);
 
-  netif_add_vlan(&vlan3_netif, IP_ADDR_ANY, IP_ADDR_ANY, IP_ADDR_ANY, 3, 0, t41_extra_netif_init, 0);
-  netif_set_up(&vlan3_netif);
+  IP4_ADDR(&vlan1_ip,172,17,1,3);
+  IP4_ADDR(&vlan1_mask,255,255,255,0);
+  IP4_ADDR(&vlan1_gw,172,17,1,1);
+  IP4_ADDR(&vlan3_ip,172,17,2,3);
+  IP4_ADDR(&vlan3_mask,255,255,255,0);
+  IP4_ADDR(&vlan3_gw,172,17,2,1);
+
+  enet_init(NULL, NULL, NULL);
 
   netif_set_status_callback(netif_default, netif_status_callback);
   netif_set_link_callback(netif_default, link_status_callback);
   netif_set_vlan_id(netif_default, 1);
-  netif_set_up(netif_default);
   netif_set_hostname(netif_default, DHCP_HOSTNAME);
-  dhcp_start(netif_default);
+  netif_set_ipaddr(netif_default, &vlan1_ip);
+  netif_set_netmask(netif_default, &vlan1_mask);
+  netif_set_gw(netif_default, &vlan1_gw);
+  netif_set_up(netif_default);
 
-  netif_set_hostname(&vlan3_netif, DHCP_HOSTNAME "-vlan3");
+  netif_add_vlan(&vlan3_netif, &vlan3_ip, &vlan3_mask, &vlan3_gw, 3, 0, t41_extra_netif_init, 0);
   netif_set_status_callback(&vlan3_netif, netif_status_callback);
   netif_set_link_callback(&vlan3_netif, link_status_callback);
-  dhcp_start(&vlan3_netif);
-  Serial.println("waiting for links");
+  netif_set_hostname(&vlan3_netif, DHCP_HOSTNAME "-vlan3");
+
+//  dhcp_start(netif_default);
+//  dhcp_start(&vlan3_netif);
+
+  Serial.println("waiting for link");
   while (!netif_is_link_up(netif_default)) {
     enet_proc_input(); // await on link up
     enet_poll();
     delay(1);
   }
-  while (!netif_is_link_up(&vlan3_netif)) {
-    enet_proc_input(); // await on link up
-    enet_poll();
-    delay(1);
-  }
+  netif_set_up(&vlan3_netif);
+  netif_set_link_up(&vlan3_netif);
 
   pps.begin();
   server.setup();
@@ -110,6 +157,7 @@ void setup() {
   }
   msec = 0;
   setup_multicast();
+  udp_nmea_srv();
 }
 
 static uint8_t median(int64_t one, int64_t two, int64_t three) {
@@ -290,4 +338,8 @@ void loop() {
   enet_proc_input();
 
   send_pending_nmea_string();
+
+  enet_proc_input();
+
+  nmea_send_to_gps();
 }
