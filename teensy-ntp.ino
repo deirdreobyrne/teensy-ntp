@@ -37,6 +37,9 @@ NTPServer server(&localClock);
 char *nmea_tx_buffer = 0;
 int nmea_tx_index = 0;
 int nmea_tx_bytes_remaining = 0;
+char *raw_tx_buffer = 0;
+int raw_tx_index = 0;
+int raw_tx_bytes_remaining = 0;
 
 ip4_addr_t vlan1_ip, vlan1_mask, vlan1_gw, vlan3_ip, vlan3_mask, vlan3_gw;
 
@@ -67,7 +70,21 @@ void udp_nmea_callback(void * arg, struct udp_pcb * upcb, struct pbuf * p, const
   pbuf_free(p);
 }
 
-void nmea_send_to_gps() {
+void udp_raw_callback(void * arg, struct udp_pcb * upcb, struct pbuf * p, const ip_addr_t * addr, u16_t port)
+{
+  if (p == NULL) return;
+  if (raw_tx_buffer == NULL) {
+    raw_tx_buffer = (char*)malloc(p->len);
+    if (raw_tx_buffer) {
+      memcpy(raw_tx_buffer, p->payload, p->len);
+      raw_tx_index = 0;
+      raw_tx_bytes_remaining = p->len;
+    }
+  }
+  pbuf_free(p);
+}
+
+void nmea_raw_send_to_gps() {
   if (nmea_tx_bytes_remaining) {
     if (GPS_SERIAL.availableForWrite()) {
       GPS_SERIAL.write(nmea_tx_buffer[nmea_tx_index++]);
@@ -79,15 +96,29 @@ void nmea_send_to_gps() {
       }
     }
   }
+  if (raw_tx_bytes_remaining) {
+    if (Serial2.availableForWrite()) {
+      Serial2.write(raw_tx_buffer[raw_tx_index++]);
+      raw_tx_bytes_remaining--;
+      if (!raw_tx_bytes_remaining) {
+        free(raw_tx_buffer);
+        raw_tx_buffer = 0;
+        raw_tx_index = 0;
+      }
+    }
+  }
 }
 
-void udp_nmea_srv() {
+void udp_nmea_raw_srv() {
   struct udp_pcb *pcb;
 
   Serial.println("udp nmea srv on port 2048");
   pcb = udp_new();
   udp_bind(pcb, UDP_LISTEN_ADDR, 2048);    // local port
   udp_recv(pcb, udp_nmea_callback, NULL);  // do once?
+  Serial.println("udp raw srv on port 2049");
+  udp_bind(pcb, UDP_LISTEN_ADDR, 2049);    // local port
+  udp_recv(pcb, udp_raw_callback, NULL);  // do once?
   // fall into loop  ether_poll
 }
 
@@ -158,7 +189,7 @@ void setup() {
   }
   msec = 0;
   setup_multicast();
-  udp_nmea_srv();
+  udp_nmea_raw_srv();
 }
 
 static uint8_t median(int64_t one, int64_t two, int64_t three) {
@@ -342,5 +373,5 @@ void loop() {
 
   enet_proc_input();
 
-  nmea_send_to_gps();
+  nmea_raw_send_to_gps();
 }
