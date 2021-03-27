@@ -36,6 +36,7 @@ NTPServer server(&localClock);
 
 char *nmea_tx_buffer = 0;
 int nmea_tx_index = 0;
+int nmea_tx_bytes_remaining = 0;
 
 ip4_addr_t vlan1_ip, vlan1_mask, vlan1_gw, vlan3_ip, vlan3_mask, vlan3_gw;
 
@@ -56,22 +57,22 @@ void udp_nmea_callback(void * arg, struct udp_pcb * upcb, struct pbuf * p, const
 {
   if (p == NULL) return;
   if (nmea_tx_buffer == NULL) {
-    nmea_tx_buffer = (char*)malloc(p->len+1);
+    nmea_tx_buffer = (char*)malloc(p->len);
     if (nmea_tx_buffer) {
       memcpy(nmea_tx_buffer, p->payload, p->len);
-      nmea_tx_buffer[p->len] = 0;
       nmea_tx_index = 0;
+      nmea_tx_bytes_remaining = p->len;
     }
   }
   pbuf_free(p);
 }
 
 void nmea_send_to_gps() {
-  if (nmea_tx_buffer) {
-    if (Serial2.availableForWrite()) {
-      if (nmea_tx_buffer[nmea_tx_index]) {
-        Serial2.write(nmea_tx_buffer[nmea_tx_index++]);
-      } else {
+  if (nmea_tx_bytes_remaining) {
+    if (GPS_SERIAL.availableForWrite()) {
+      GPS_SERIAL.write(nmea_tx_buffer[nmea_tx_index++]);
+      nmea_tx_bytes_remaining--;
+      if (!nmea_tx_bytes_remaining) {
         free(nmea_tx_buffer);
         nmea_tx_buffer = 0;
         nmea_tx_index = 0;
