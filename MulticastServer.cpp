@@ -1,5 +1,9 @@
+#include <Arduino.h>
 #include <stdio.h>
 #include <string.h>
+#include "DateTime.h"
+#include "GPS.h"
+#include "WebContent.h"
 #include "lwipopts.h"
 #include "lwip_t41.h"
 #include "lwip/netif.h"
@@ -12,42 +16,96 @@
 // #include "MulticastServer.h"
 #include "settings.h"
 
-#define SYSTEM_STATS_PERIOD_MS 300000
+// WAS once every 5 minnutes - when all I was sending was the temperature
+#define SYSTEM_STATS_PERIOD_MS 59000
 #define RAW_GPS_BUFFER_SIZE 1200
 #define RAW_GPS_MAX_QUIET_MS 250
+#define SYSTEM_STATS_STRLEN 1400
 
 #define PERIOD_EXPIRED(nowMillis,startMillis,period) ((nowMillis - startMillis) >= period)
 
 ip4_addr_t systemStatsAddr, nmeaAddr, rawAddr;
-uint32_t systemStatsTime, lastRawSendTime;
-char systemStatsTemplate[70];
+uint32_t systemStatsTime;
+#ifdef GPS_SECOND_SERIAL_PORT
 char rawGpsBuffer[RAW_GPS_BUFFER_SIZE];
 int rawGpsBufferLen = 0;
+uint32_t lastRawSendTime;
+#endif
 char *nmeaString = 0;
 
 void setup_multicast() {
   IP4_ADDR(&systemStatsAddr, 239,0,0,1);
   IP4_ADDR(&nmeaAddr, 239,0,0,2);
+#ifdef GPS_SECOND_SERIAL_PORT
   IP4_ADDR(&rawAddr, 239,0,0,3);
-  systemStatsTime = millis() - SYSTEM_STATS_PERIOD_MS;
-  strcpy(systemStatsTemplate, "{\"topic\":\"teensy-ntp-cpu-temperature\",\"payload\":%.1f}");
   lastRawSendTime = millis();
+#endif
+  systemStatsTime = millis() - SYSTEM_STATS_PERIOD_MS;
+}
+
+void compile_system_stats_json(char *json_buf, int json_buf_len) {
+  int len = snprintf(json_buf, json_buf_len, 
+    "{\"topic\":\"teensy-gps\", \"payload\":{"
+    "\"temp\":%.1f, \"ppsToGPS\": %lu, \"ppsMs\": %lu, \"curMs\": %lu, \"gpsT\": %lu, \"counterPPS\": %lu, \"offset\": %.9f, \"pidD\": %.9f, \"dChiSq\": %.9f, \"clockPpb\": %ld,",
+    tempmonGetTemp(),
+    webcontent.ppsToGPS,
+    webcontent.ppsMillis,
+    millis(),
+    webcontent.gpstime,
+    webcontent.counterPPS,
+    webcontent.offsetHuman,
+    webcontent.pidD,
+    webcontent.dChiSq,
+    webcontent.clockPpb);
+  if (len >= json_buf_len) {
+    json_buf[json_buf_len-1]='\0';
+    return;
+  }
+  len += snprintf(json_buf + len, json_buf_len - len,
+    "\"lockStatus\": %u, \"strongSig\": %lu, \"weakSig\": %lu, \"noSig\": %lu, \"gpsCap\": %lu, \"pdop\": %.1f, \"hdop\": %.1f, \"vdop\": %.1f, \"sats\": [",
+    gps.lockStatus(),
+    gps.strongSignals(),
+    gps.weakSignals(),
+    gps.noSignals(),
+    gps.capturedAt(),
+    gps.getPdop(),
+    gps.getHdop(),
+    gps.getVdop()
+    );
+  if (len >= json_buf_len) {
+    json_buf[json_buf_len-1]='\0';
+    return;
+  }
+
+  const struct satellite *satinfo = gps.getSatellites();
+  for(uint8_t i = 0; i < MAX_SATELLITES && satinfo[i].id; i++) {
+    const char *format = (i == 0) ? "[%u,%u,%u,%u]" : ",[%u,%u,%u,%u]";
+    len += snprintf(json_buf + len, json_buf_len - len,
+        format, satinfo[i].id, satinfo[i].elevation, satinfo[i].azimuth, satinfo[i].snr
+        );
+    if (len >= json_buf_len) {
+      json_buf[json_buf_len-1] = '\0';
+      return;
+    }
+  }
+  snprintf(json_buf + len, json_buf_len - len, "]}}");
+  json_buf[json_buf_len-1] = '\0';
 }
 
 void poll_system_stats() {
   uint32_t currentMillis = millis();
   if (PERIOD_EXPIRED(currentMillis,systemStatsTime,SYSTEM_STATS_PERIOD_MS) && (TEMPMON_TEMPSENSE0 & 0x4U)) {
-    char msg[70];
+    char msg[SYSTEM_STATS_STRLEN];
     struct udp_pcb *pcb;
     struct pbuf *pb;
     int len;
 
-    snprintf(msg, 70, systemStatsTemplate, tempmonGetTemp());
+    compile_system_stats_json(msg, SYSTEM_STATS_STRLEN);
     len = strlen(msg);
     pb = pbuf_alloc(PBUF_TRANSPORT, len, PBUF_RAM);
     pcb = udp_new();
     pbuf_take(pb, msg, len);
-    udp_sendto_if(pcb, pb, &systemStatsAddr, 1025, netif_default);
+    udp_sendto_if(pcb, pb, &systemStatsAddr, /* 1025 */ 1028, netif_default);
     pbuf_free(pb);
     udp_remove(pcb);
     systemStatsTime = currentMillis;
@@ -57,7 +115,7 @@ void poll_system_stats() {
 void multicast_nmea_string(const char *nmea) {
   if (!nmeaString) {
     int len = strlen(nmea)-1;
-    nmeaString = malloc(len+1);
+    nmeaString = (char*)malloc(len+1);
     if (nmeaString) strncpy(nmeaString, nmea, len);  // It will always have a CR or an LF at the end - see GPS.cpp
     nmeaString[len]=0;
   }
@@ -79,6 +137,7 @@ void send_pending_nmea_string() {
   }
 }
 
+#ifdef GPS_SECOND_SERIAL_PORT
 void send_gps_raw() {
   if (rawGpsBufferLen) {
     struct udp_pcb *pcb;
@@ -105,3 +164,4 @@ void add_raw_gps_char(char c) {
 void poll_raw_multicast() {
   if (PERIOD_EXPIRED(millis(),lastRawSendTime,RAW_GPS_MAX_QUIET_MS)) send_gps_raw();
 }
+#endif

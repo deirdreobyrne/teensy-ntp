@@ -18,6 +18,7 @@
 #include "settings.h"
 
 #define WAIT_COUNT 3
+#undef SERIAL_DEBUG
 
 GPSDateTime gps(&GPS_SERIAL);
 NTPClock localClock;
@@ -49,11 +50,15 @@ struct netif vlan3_netif;
 
 static void netif_status_callback(struct netif *netif) {
   static char str1[IP4ADDR_STRLEN_MAX], str2[IP4ADDR_STRLEN_MAX], str3[IP4ADDR_STRLEN_MAX];
+#ifdef SERIAL_DEBUG
   Serial.printf("netif %c%c status changed: ip %s, mask %s, gw %s\n", netif->name[0], netif->name[1], ip4addr_ntoa_r(netif_ip_addr4(netif), str1, IP4ADDR_STRLEN_MAX), ip4addr_ntoa_r(netif_ip_netmask4(netif), str2, IP4ADDR_STRLEN_MAX), ip4addr_ntoa_r(netif_ip_gw4(netif), str3, IP4ADDR_STRLEN_MAX));
+#endif
 }
 
 static void link_status_callback(struct netif *netif) {
+#ifdef SERIAL_DEBUG
   Serial.printf("enet netif %c%c link status: %s\n", netif->name[0], netif->name[1], netif_is_link_up(netif) ? "up" : "down");
+#endif
 }
 
 void udp_nmea_callback(void * arg, struct udp_pcb * upcb, struct pbuf * p, const ip_addr_t * addr, u16_t port)
@@ -96,9 +101,10 @@ void nmea_raw_send_to_gps() {
       }
     }
   }
+#ifdef GPS_SECOND_SERIAL_PORT
   if (raw_tx_bytes_remaining) {
-    if (Serial2.availableForWrite()) {
-      Serial2.write(raw_tx_buffer[raw_tx_index++]);
+    if (GPS_SECOND_SERIAL_PORT.availableForWrite()) {
+      GPS_SECOND_SERIAL_PORT.write(raw_tx_buffer[raw_tx_index++]);
       raw_tx_bytes_remaining--;
       if (!raw_tx_bytes_remaining) {
         free(raw_tx_buffer);
@@ -107,32 +113,42 @@ void nmea_raw_send_to_gps() {
       }
     }
   }
+#endif
 }
 
 void udp_nmea_raw_srv() {
   struct udp_pcb *pcb;
 
+#ifdef SERIAL_DEBUG
   Serial.println("udp nmea srv on port 2048");
+#endif
   pcb = udp_new();
   udp_bind(pcb, UDP_LISTEN_ADDR, 2048);    // local port
   udp_recv(pcb, udp_nmea_callback, NULL);  // do once?
+#ifdef SERIAL_DEBUG
   Serial.println("udp raw srv on port 2049");
+#endif
   udp_bind(pcb, UDP_LISTEN_ADDR, 2049);    // local port
   udp_recv(pcb, udp_raw_callback, NULL);  // do once?
   // fall into loop  ether_poll
 }
 
 void setup() {
+#ifdef SERIAL_DEBUG
   Serial.begin(115200);
+#endif
 
   DateTime compile = DateTime(__DATE__, __TIME__);
 
   GPS_SERIAL.begin(GPS_BAUD);
-  Serial2.begin(GPS_BAUD);
+#ifdef GPS_SECOND_SERIAL_PORT
+  GPS_SECOND_SERIAL_PORT.begin(GPS_BAUD);
+#endif
 
+#ifdef SERIAL_DEBUG
   Serial.println("Ethernet 1588 NTP Server");
   Serial.println("------------------------\n");
-
+#endif
 
   IP4_ADDR(&vlan1_ip,172,17,1,3);
   IP4_ADDR(&vlan1_mask,255,255,255,0);
@@ -160,7 +176,9 @@ void setup() {
 //  dhcp_start(netif_default);
 //  dhcp_start(&vlan3_netif);
 
+#ifdef SERIAL_DEBUG
   Serial.println("waiting for link");
+#endif
   while (!netif_is_link_up(netif_default)) {
     enet_proc_input(); // await on link up
     enet_poll();
@@ -184,9 +202,11 @@ void setup() {
   while(GPS_SERIAL.available()) { // throw away all the text received while starting up
     GPS_SERIAL.read();
   }
-  while(Serial2.available()) { // throw away all the text received while starting up
-    Serial2.read();
+#ifdef GPS_SECOND_SERIAL_PORT
+  while(GPS_SECOND_SERIAL_PORT.available()) { // throw away all the text received while starting up
+    GPS_SECOND_SERIAL_PORT.read();
   }
+#endif
   msec = 0;
   setup_multicast();
   udp_nmea_raw_srv();
@@ -238,12 +258,14 @@ void updateTime(uint32_t gpstime) {
   uint32_t ppsToGPS = gps.capturedAt() - gps.ppsMillis();
   webcontent.setPPSData(ppsToGPS, gps.ppsMillis(), gpstime);
   if(ppsToGPS > 950) { // allow 950ms between PPS and GPS message
+#ifdef SERIAL_DEBUG
     Serial.print("LAG ");
     Serial.print(ppsToGPS);
     Serial.print(" ");
     Serial.print(gps.ppsMillis());
     Serial.print(" ");
     Serial.println(gpstime);
+#endif
     return;
   }
 
@@ -271,6 +293,7 @@ void updateTime(uint32_t gpstime) {
 
       double offsetHuman = samples[median_index].offset / (double)4294967296.0;
       webcontent.setLocalClock(samples[median_index].pps, offsetHuman, ClockPID.d(), ClockPID.d_chi(), localClock.getPpb(), gpstime);
+#ifdef SERIAL_DEBUG
       Serial.print(samples[median_index].pps);
       Serial.print(" ");
       Serial.print(offsetHuman, 9);
@@ -282,15 +305,18 @@ void updateTime(uint32_t gpstime) {
       Serial.print(localClock.getPpb());
       Serial.print(" ");
       Serial.println(samples[median_index].gpstime);
+#endif
     }
   } else {
     localClock.setTime(lastPPS, gpstime);
     ClockPID.add_sample(lastPPS, gpstime, 0);
     settime = 1;
+#ifdef SERIAL_DEBUG
     Serial.print("S "); // clock set message
     Serial.print(lastPPS);
     Serial.print(" ");
     Serial.println(gpstime);
+#endif
   }
 }
 
@@ -315,8 +341,10 @@ static void gps_serial_poll() {
     if(gps.decode()) {
       uint32_t gpstime = gps.GPSnow().ntptime();
       if(gpstime < compileTime) {
+#ifdef SERIAL_DEBUG
         Serial.print("B "); // gps clock bad message (for example, on startup before GPS almanac)
         Serial.println(gpstime);
+#endif
       } else {
         updateTime(gpstime);
       }
@@ -326,6 +354,7 @@ static void gps_serial_poll() {
 
 // useful when using teensy_loader_cli
 static void bootloader_poll() {
+#ifdef SERIAL_DEBUG
   if(Serial.available()) {
     char r = Serial.read();
     if(r == 'r') {
@@ -334,13 +363,16 @@ static void bootloader_poll() {
       asm("bkpt #251"); // run bootloader
     }
   }
+#endif
 }
 
+#ifdef GPS_SECOND_SERIAL_PORT
 void poll_raw_input() {
-  if (Serial2.available()) {
-    add_raw_gps_char(Serial2.read());
+  if (GPS_SECOND_SERIAL_PORT.available()) {
+    add_raw_gps_char(GPS_SECOND_SERIAL_PORT.read());
   }
 }
+#endif
 
 void loop() {
   enet_proc_input();
@@ -351,14 +383,17 @@ void loop() {
 
   gps_serial_poll();
 
+#ifdef SERIAL_DEBUG
   enet_proc_input();
 
-  bootloader_poll();
+  bootloader_poll(); // <-- Needs the USB serial port
+#endif
 
   enet_proc_input();
 
   poll_system_stats();
 
+#ifdef GPS_SECOND_SERIAL_PORT
   enet_proc_input();
 
   poll_raw_multicast();
@@ -366,6 +401,7 @@ void loop() {
   enet_proc_input();
 
   poll_raw_input();
+#endif
 
   enet_proc_input();
 

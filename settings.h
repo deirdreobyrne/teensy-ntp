@@ -8,3 +8,6 @@
 #define GPS_SERIAL Serial1
 
 #define DHCP_HOSTNAME "teensy-ntp"
+
+//#define GPS_SECOND_SERIAL_PORT Serial2
+#undef GPS_SECOND_SERIAL_PORT

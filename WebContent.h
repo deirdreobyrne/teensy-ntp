@@ -7,7 +7,7 @@ class WebContent {
     void setPPSData(uint32_t new_ppsToGPS, uint32_t new_ppsMillis, uint32_t new_gpstime);
     void setLocalClock(uint32_t new_counterPPS, double new_offsetHuman, double new_pidD, double new_dChiSq, int32_t new_clockPpb, uint32_t new_gpstime);
 
-  private:
+//  private:
     char jsonBuffer[1500] = "";
     uint32_t ppsToGPS = 0, ppsMillis = 0, gpstime = 0;
     uint32_t counterPPS = 0;
